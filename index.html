@@ -120,15 +120,43 @@ nav.tabs button.add .e{background:var(--accent);color:#fff;width:40px;height:40p
 .kv b{text-align:right}
 .avatar{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);border:2px solid var(--card);box-shadow:0 0 0 1px var(--line);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0;cursor:pointer;font-size:18px;flex:none;margin:0}
 .avatar img{width:100%;height:100%;object-fit:cover;display:block}
-.avatar.lg{width:88px;height:88px;font-size:40px;box-shadow:0 0 0 2px var(--accent)}
+.avatar.lg{width:110px;height:110px;font-size:40px;box-shadow:0 0 0 2px var(--accent)}
 .selfie{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+#splash{position:fixed;inset:0;z-index:50;background:#0c110f;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;transition:opacity .55s ease,transform .55s ease}
+#splash.out{opacity:0;transform:scale(1.04);pointer-events:none}
+#splash .sp-bg{position:absolute;inset:-10%;background:url("./splash.webp") center/cover;filter:blur(28px) brightness(.45) saturate(1.2);animation:spBg 6s ease-out both}
+#splash .sp-main{position:relative;width:min(92vw,520px);text-align:center}
+#splash .sp-card{position:relative;border-radius:22px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.55);animation:spIn .9s cubic-bezier(.2,.8,.2,1) both}
+#splash .sp-card img{display:block;width:100%;height:auto;animation:spZoom 4s ease-out .2s both}
+#splash .sp-shine{position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.35) 50%,transparent 65%);transform:translateX(-120%);animation:spShine 1.2s ease-in-out 1s both}
+#splash .sp-sub{color:#e9f1ec;font-weight:600;font-size:15px;margin-top:20px;opacity:0;animation:spUp .7s ease-out .7s forwards}
+#splash .sp-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.15);margin:18px auto 0;width:60%;overflow:hidden;opacity:0;animation:spUp .5s ease-out .9s forwards}
+#splash .sp-bar i{display:block;height:100%;width:0;background:#5cbf91;border-radius:2px;animation:spFill 2s ease-in-out 1s forwards}
+#splash .sp-skip{position:absolute;bottom:calc(28px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;color:rgba(255,255,255,.55);font-size:13px;opacity:0;animation:spUp .5s ease-out 1.6s forwards}
+@keyframes spIn{from{opacity:0;transform:translateY(30px) scale(.92)}to{opacity:1;transform:none}}
+@keyframes spZoom{from{transform:scale(1.12)}to{transform:scale(1)}}
+@keyframes spShine{to{transform:translateX(120%)}}
+@keyframes spUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes spFill{to{width:100%}}
+@keyframes spBg{from{transform:scale(1.25)}to{transform:scale(1.1)}}
+@media (prefers-reduced-motion:reduce){#splash *{animation-duration:.01s!important;animation-delay:0s!important}}
+#hdrName{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55vw}
 .hero{font-size:34px;font-weight:800;letter-spacing:-.03em}
 </style>
 </head>
 <body>
+<div id="splash" role="img" aria-label="Calcula tu déficit calórico">
+  <div class="sp-bg"></div>
+  <div class="sp-main">
+    <div class="sp-card"><img src="./splash.webp" alt="" id="spImg"><i class="sp-shine"></i></div>
+    <div class="sp-sub">Tu objetivo de calorías y tus comidas, con una foto</div>
+    <div class="sp-bar"><i></i></div>
+  </div>
+  <div class="sp-skip">Toca para empezar</div>
+</div>
 <div class="wrap">
   <header class="top">
-    <div class="row"><button type="button" class="avatar" id="avatarSm" data-go="perfil" aria-label="Perfil"><span>🙂</span></button><h1>Déficit</h1></div>
+    <div class="row"><button type="button" class="avatar" id="avatarSm" data-go="perfil" aria-label="Perfil"><span>🙂</span></button><h1 id="hdrName">Hola 👋</h1></div>
     <span class="date" id="hdrDate"></span>
   </header>
 
@@ -266,10 +294,11 @@ nav.tabs button.add .e{background:var(--accent);color:#fff;width:40px;height:40p
         <div>
           <label for="selfieIn" class="btn sm" style="display:inline-block;margin:0;color:#fff">📸 Hacerme un selfie</label>
           <button type="button" class="btn sm ghost hidden" id="selfieDel" style="margin-left:6px">Quitar</button>
-          <div class="muted small" style="margin-top:6px">Se guarda solo en tu cuenta.</div>
+          <div class="muted small" style="margin-top:6px">Se guarda solo en este móvil.</div>
         </div>
         <input type="file" id="selfieIn" accept="image/*" capture="user" class="hidden">
       </div>
+      <div style="margin-bottom:10px"><label for="pName">Tu nombre</label><input id="pName" maxlength="30" placeholder="¿Cómo te llamas?" autocomplete="given-name"></div>
       <label>Sexo</label>
       <div class="seg" id="pSex" style="margin-bottom:10px"><button type="button" data-v="m">Mujer</button><button type="button" data-v="h">Hombre</button></div>
       <div class="grid2">
@@ -334,6 +363,16 @@ nav.tabs button.add .e{background:var(--accent);color:#fff;width:40px;height:40p
 <script>
 (() => {
 "use strict";
+/* ---------- splash ---------- */
+(function(){
+  const sp = document.getElementById("splash"); if (!sp) return;
+  let seen = false; try { seen = sessionStorage.getItem("deficit:splash") === "1"; sessionStorage.setItem("deficit:splash","1"); } catch(e){}
+  const close = () => { if (sp.classList.contains("out")) return; sp.classList.add("out"); setTimeout(() => sp.remove(), 600); };
+  if (seen) { sp.remove(); return; }
+  document.getElementById("spImg").addEventListener("error", () => sp.remove());
+  sp.addEventListener("click", close);
+  setTimeout(close, 3300);
+})();
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const round = n => Math.round(n);
@@ -783,18 +822,32 @@ segInit("#pSex"); segInit("#pRate");
 let draftPhoto = undefined; // photo taken before the profile exists
 function currentPhoto(){ return S.profile ? S.profile.photo : draftPhoto; }
 function renderAvatar(){
+  const nm = S.profile && S.profile.name ? S.profile.name : "";
+  $("#hdrName").textContent = nm ? "Hola, " + nm : "Hola 👋";
   const ph = currentPhoto();
   const html = ph ? `<img src="${ph}" alt="Tu foto">` : `<span>🙂</span>`;
   $("#avatarSm").innerHTML = html; $("#avatarBig").innerHTML = html;
   $("#selfieDel").classList.toggle("hidden", !ph);
 }
 function avatarOf(img){
-  const size = 240, cv = document.createElement("canvas"); cv.width = cv.height = size;
+  // High-quality downscale: crop to a square, then halve step by step (one big jump makes it pixelated/blurry)
+  const OUT = 512;
   const s = Math.min(img.naturalWidth, img.naturalHeight);
-  // centred square crop, slightly biased upward to keep the face
   const sx = (img.naturalWidth - s)/2, sy = Math.max(0, (img.naturalHeight - s)/2 - (img.naturalHeight - s)*0.25);
-  cv.getContext("2d").drawImage(img, sx, sy, s, s, 0, 0, size, size);
-  return cv.toDataURL("image/jpeg", 0.75);
+  let cv = document.createElement("canvas"); cv.width = cv.height = s;
+  let ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, sx, sy, s, s, 0, 0, s, s);
+  let cur = s;
+  while (cur / 2 >= OUT) {
+    const next = Math.round(cur / 2), c2 = document.createElement("canvas"); c2.width = c2.height = next;
+    const x2 = c2.getContext("2d"); x2.imageSmoothingEnabled = true; x2.imageSmoothingQuality = "high";
+    x2.drawImage(cv, 0, 0, cur, cur, 0, 0, next, next);
+    cv = c2; cur = next;
+  }
+  const out = document.createElement("canvas"); out.width = out.height = Math.min(OUT, cur);
+  const xo = out.getContext("2d"); xo.imageSmoothingEnabled = true; xo.imageSmoothingQuality = "high";
+  xo.drawImage(cv, 0, 0, cur, cur, 0, 0, out.width, out.height);
+  return out.toDataURL("image/jpeg", 0.92);
 }
 function setPhoto(ph){
   if (S.profile) { S.profile.photo = ph || null; store.set("profile", S.profile); }
@@ -811,7 +864,7 @@ $("#selfieDel").addEventListener("click", () => { setPhoto(null); toast("Foto qu
 function fillProfileForm(){
   const p = S.profile;
   segSet("#pSex", p ? p.sex : "m"); segSet("#pRate", p ? p.rate : "0.5");
-  $("#pAge").value = p ? p.age : ""; $("#pH").value = p ? p.height : ""; $("#pW").value = p ? p.weight : "";
+  $("#pName").value = p && p.name ? p.name : ""; $("#pAge").value = p ? p.age : ""; $("#pH").value = p ? p.height : ""; $("#pW").value = p ? p.weight : "";
   $("#pGoal").value = p && p.goal ? p.goal : ""; $("#pAct").value = p ? p.activity : "1.375";
   renderAvatar(); renderCalc();
 }
@@ -834,7 +887,7 @@ function renderCalc(){
 $("#pform").addEventListener("submit", e => {
   e.preventDefault();
   const sex = segGet("#pSex") || "m";
-  const p = { sex, age:+$("#pAge").value, height:+$("#pH").value, weight:+$("#pW").value, goal: $("#pGoal").value ? +$("#pGoal").value : null, activity:$("#pAct").value, rate: segGet("#pRate") || "0.5" };
+  const p = { name: $("#pName").value.trim().slice(0,30), sex, age:+$("#pAge").value, height:+$("#pH").value, weight:+$("#pW").value, goal: $("#pGoal").value ? +$("#pGoal").value : null, activity:$("#pAct").value, rate: segGet("#pRate") || "0.5" };
   if (!p.age || !p.height || !p.weight) { toast("Completa edad, altura y peso"); return; }
   const weights = (S.profile && S.profile.weights) ? S.profile.weights.slice() : [];
   const last = weights[weights.length-1];
