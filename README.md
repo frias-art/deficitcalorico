@@ -9,13 +9,13 @@ App web para móvil que calcula tu objetivo de calorías para un déficit calór
 | `index.html` | La app completa |
 | `manifest.json` | Permite instalarla en el móvil como una app (icono, nombre, pantalla completa) |
 | `sw.js` | Hace que abra aunque no tengas conexión |
-| `icons/` | Iconos de la app |
+| `icon-*.png`, `apple-touch-icon.png` | Iconos de la app (sueltos, sin carpeta) |
 | `.nojekyll` | Le dice a GitHub Pages que publique los archivos tal cual |
 
 ## Publicarla en GitHub Pages
 
 1. Entra en github.com y crea un repositorio nuevo, por ejemplo `deficit`. Puede ser público (GitHub Pages gratis lo exige en cuentas personales).
-2. En el repositorio pulsa **Add file → Upload files** y arrastra **todo el contenido** de esta carpeta (incluida la carpeta `icons`). Pulsa **Commit changes**.
+2. En el repositorio pulsa **Add file → Upload files** y arrastra **todos los archivos** de esta carpeta (todos van sueltos, no hay subcarpetas). Pulsa **Commit changes**.
    - Si no ves el archivo `.nojekyll` al arrastrar (es un archivo oculto), no pasa nada: la app funciona igual.
 3. Ve a **Settings → Pages**. En *Source* elige **Deploy from a branch**, rama **main** y carpeta **/ (root)**. Pulsa **Save**.
 4. Espera 1-2 minutos. Tu app estará en `https://TU-USUARIO.github.io/deficit/`
@@ -43,7 +43,7 @@ Perfil, comidas y peso se guardan en el almacenamiento del navegador de tu móvi
 
 ## Actualizar la app
 
-Sube el nuevo `index.html` al repositorio (sustituyendo el anterior) y cambia en `sw.js` la línea `const VERSION = "deficit-v1";` por `deficit-v2`, `deficit-v3`… para que los móviles descarguen la versión nueva.
+Sube el nuevo `index.html` al repositorio (sustituyendo el anterior) y sube la siguiente versión en `sw.js` (la línea `const VERSION = "deficit-v3";` pasa a `deficit-v4`, `deficit-v5`…) para que los móviles descarguen la versión nueva.
 
 ---
 
