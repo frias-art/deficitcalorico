@@ -52,6 +52,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .seg button{flex:1;border:0;background:transparent;font:inherit;font-size:13px;font-weight:600;color:var(--ink2);padding:8px 4px;border-radius:9px;cursor:pointer}
 .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .seg.wrap{flex-wrap:wrap}
+#v-add .edit-only{display:none}
+#v-add.editing .edit-only{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+#v-add.editing .edit-only img{width:56px;height:56px;border-radius:12px;object-fit:cover}
+#v-add.editing #addMode,#v-add.editing #m-foto,#v-add.editing #m-texto,#v-add.editing #m-manual,#v-add.editing #ctxQ,#v-add.editing #analyze,#v-add.editing #aiStatus{display:none!important}
+#v-add.editing .card:first-child h2{display:none}
 .seg.wrap button{flex:1 0 auto;padding:7px 9px}
 .doubt{margin-bottom:10px}
 .doubt .q{font-size:13px;font-weight:700;margin-bottom:6px}
@@ -250,6 +255,7 @@ nav.tabs button.add .e{background:var(--accent);color:#fff;width:40px;height:40p
     </div>
 
     <div class="card hidden" id="resultCard">
+      <div id="editHead" class="edit-only"></div>
       <h2 id="resTitle">Resultado</h2>
       <p class="muted small" style="margin:-4px 0 8px">Revisa las cantidades: si cambias los gramos, las calorías se ajustan solas.</p>
       <div class="items" id="items"></div>
@@ -258,6 +264,7 @@ nav.tabs button.add .e{background:var(--accent);color:#fff;width:40px;height:40p
       <div id="resNote"></div>
       <div id="refine" class="hidden" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
         <h2 style="font-size:14px">Para afinar más</h2>
+        <p class="small muted" id="refineHint" style="margin:-4px 0 8px"></p>
         <div id="doubts"></div>
         <label for="fix" style="margin-top:8px">¿Algo que corregir? (opcional)</label>
         <input id="fix" placeholder="Ej.: el pan es integral, la carne es cerdo, eran 2 huevos">
@@ -487,6 +494,7 @@ function calc(p){
 /* ---------- navigation ---------- */
 function go(v){
   if ((v==="add"||v==="hist") && !S.profile) v = "perfil";
+  if (v !== "add" && typeof editing !== "undefined" && editing) { endEdit(); resetAdd(); }
   S.view = v;
   ["hoy","add","hist","perfil"].forEach(x => $("#v-"+x).classList.toggle("hidden", x!==v));
   $$("nav.tabs button").forEach(b => b.classList.toggle("on", b.dataset.go===v));
@@ -535,18 +543,78 @@ function renderToday(){
   const order = {Desayuno:0,Comida:1,Snack:2,Cena:3};
   const meals = [...d.meals].sort((a,b)=>(a.ts||0)-(b.ts||0));
   $("#mealList").innerHTML = meals.length ? meals.map(m => `
-    <div class="meal">
+    <div class="meal" data-edit="${m.id}">
       ${m.thumb ? `<img src="${m.thumb}" alt="">` : `<div class="ph">${m.src==="texto"?"✍️":m.src==="manual"?"🔢":"🍽️"}</div>`}
       <div class="info"><span class="tag">${esc(m.type)}</span><div class="name">${esc(m.name)}</div><div class="small muted">P ${round(m.p)} · C ${round(m.c)} · G ${round(m.f)}</div></div>
       <div class="kc">${fmt(m.kcal)}</div>
+      <button class="x" data-edit="${m.id}" aria-label="Editar">✏️</button>
       <button class="x" data-del="${m.id}" aria-label="Borrar">×</button>
     </div>`).join("") : `<p class="muted small" style="margin:6px 0">Aún no has registrado nada hoy.</p>`;
 }
 $("#mealList").addEventListener("click", e => {
-  const b = e.target.closest("[data-del]"); if (!b) return;
-  const d = dayOf(today()); d.meals = d.meals.filter(m => m.id !== b.dataset.del);
-  store.set("day-"+today(), d); renderToday(); toast("Comida borrada");
+  const b = e.target.closest("[data-del]");
+  if (b) {
+    const d = dayOf(today()); d.meals = d.meals.filter(m => m.id !== b.dataset.del);
+    store.set("day-"+today(), d); photoStore.del(b.dataset.del); renderToday(); toast("Comida borrada");
+    return;
+  }
+  const ed = e.target.closest("[data-edit]"); if (ed) editMeal(ed.dataset.edit);
 });
+
+/* ---------- photos of meals (IndexedDB, so they can be re-analysed later) ---------- */
+const photoStore = (() => {
+  let dbp = null;
+  function open(){
+    if (dbp) return dbp;
+    dbp = new Promise((res) => {
+      try {
+        const r = indexedDB.open("deficit-photos", 1);
+        r.onupgradeneeded = () => r.result.createObjectStore("p");
+        r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+      } catch(e) { res(null); }
+    });
+    return dbp;
+  }
+  const tx = async (mode, fn) => { const db = await open(); if (!db) return null;
+    return new Promise(res => { try { const t = db.transaction("p", mode); const q = fn(t.objectStore("p")); t.oncomplete = () => res(q && q.result); t.onerror = () => res(null); } catch(e){ res(null); } }); };
+  return {
+    put: (id, blob) => blob ? tx("readwrite", st => st.put(blob, id)) : null,
+    get: id => tx("readonly", st => st.get(id)),
+    del: id => tx("readwrite", st => st.delete(id))
+  };
+})();
+
+/* ---------- edit a saved meal ---------- */
+let editing = null; // { id, day }
+function editMeal(id){
+  const d = dayOf(today()); const m = d.meals.find(x => x.id === id); if (!m) return;
+  resetAdd();
+  editing = { id, day: today(), thumb: m.thumb || null };
+  go("add");
+  $("#v-add").classList.add("editing");
+  segSet("#mealType", m.type);
+  const items = (m.items && m.items.length) ? m.items : [{ nombre: m.name, gramos: 100, k100: 0, hidden: false, base: { g: 100, kcal: m.kcal, p: m.p, c: m.c, f: m.f }, kcal: m.kcal }];
+  pending = { src: m.src, plato: m.plato || m.name, confianza: null, nota: "", items: JSON.parse(JSON.stringify(items)) };
+  lastReq = { ctx: m.ctx || ("Comida que el usuario registró: " + (m.detail || m.name) + "."), opts: {}, mode: m.src };
+  $("#editHead").innerHTML = `${m.thumb ? `<img src="${m.thumb}" alt="">` : ""}<div><div class="tag">Editando</div><div style="font-weight:800">${esc(m.plato || m.name)}</div></div>`;
+  $("#resTitle").textContent = pending.plato;
+  renderItems();
+  $("#resNote").innerHTML = "";
+  $("#doubts").innerHTML = "";
+  $("#fix").value = "";
+  $("#refine").classList.remove("hidden");
+  $("#refineHint").textContent = m.src === "foto" ? "Escribe qué ha cambiado y vuelvo a analizar la foto con tus correcciones." : "Escribe qué ha cambiado y lo recalculo.";
+  $("#saveRes").textContent = "Guardar cambios";
+  $("#cancelRes").textContent = "Cancelar";
+  $("#resultCard").classList.remove("hidden");
+  if (m.src === "foto") photoStore.get(id).then(b => { if (b && editing && editing.id === id) lastReq.opts = { images: [b] }; });
+}
+function endEdit(){
+  editing = null;
+  $("#v-add").classList.remove("editing");
+  $("#saveRes").textContent = "Guardar"; $("#cancelRes").textContent = "Descartar";
+  $("#refineHint").textContent = "";
+}
 
 /* ---------- AÑADIR ---------- */
 let photoBlob = null, photoThumb = null, pending = null;
@@ -668,12 +736,13 @@ $("#analyze").addEventListener("click", async () => {
 });
 
 $("#recalc").addEventListener("click", async () => {
-  if (!lastReq || !pending || !aiReady()) return;
+  if (!lastReq || !pending) return;
+  if (!aiReady()) { $("#resNote").innerHTML = `<div class="note warn">${ERR.no_key}</div>`; return; }
   const answers = $$("#doubts .doubt").map(d => { const v = d.querySelector("button.on"); return v ? d.dataset.q + " → " + v.dataset.v : null; }).filter(Boolean);
   const fix = $("#fix").value.trim();
   if (!answers.length && !fix) { toast("Responde alguna pregunta o escribe una corrección"); return; }
   const prev = pending.items.map(i => `${i.nombre}: ${round(i.gramos)} g, ${round(i.kcal)} kcal`).join("; ");
-  const extra = `\nYa hiciste una estimación: ${prev}.\nEl usuario aclara:\n- ${answers.concat(fix ? ["Corrección: " + fix] : []).join("\n- ")}\nRehaz la estimación aplicando estas aclaraciones. No vuelvas a preguntar lo ya respondido.`;
+  const extra = `\nYa hay una estimación (puede incluir cambios manuales del usuario): ${prev}.\nEl usuario aclara:\n- ${answers.concat(fix ? ["Corrección: " + fix] : []).join("\n- ")}\nRehaz la estimación aplicando estas aclaraciones. No vuelvas a preguntar lo ya respondido.`;
   const btn = $("#recalc"); btn.disabled = true;
   const box = (html, kind) => { $("#resNote").innerHTML = html ? `<div class="note ${kind||"ok"}">${html}</div>` : ""; };
   await runAI(PROMPT(lastReq.ctx, extra), lastReq.opts, lastReq.mode, box);
@@ -701,7 +770,7 @@ function showResult(r, src){
   const dudas = Array.isArray(r.dudas) ? r.dudas.filter(d => d && d.pregunta && Array.isArray(d.opciones) && d.opciones.length).slice(0,3) : [];
   $("#doubts").innerHTML = dudas.map(d => `<div class="doubt" data-q="${esc(d.pregunta)}"><div class="q">${esc(d.pregunta)}</div><div class="seg wrap">${d.opciones.slice(0,4).map(o => `<button type="button" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div></div>`).join("");
   $("#fix").value = "";
-  $("#refine").classList.toggle("hidden", src === "manual");
+  $("#refine").classList.toggle("hidden", src === "manual" && !editing);
   $("#resultCard").classList.remove("hidden");
   $("#resultCard").scrollIntoView({behavior:"smooth", block:"start"});
 }
@@ -724,7 +793,8 @@ function updateTotal(){
   $("#resMacros").textContent = `Proteína ${round(t.p)} g · Carbohidratos ${round(t.c)} g · Grasa ${round(t.f)} g`;
   const c = calc(S.profile);
   if (c) {
-    const left = c.target - totals(dayOf(today()).meals).kcal - t.k;
+    const others = dayOf(today()).meals.filter(m => !editing || m.id !== editing.id);
+    const left = c.target - totals(others).kcal - t.k;
     $("#resMacros").textContent += left >= 0 ? ` — te quedarán ${fmt(left)} kcal hoy` : ` — te pasarías ${fmt(-left)} kcal hoy`;
   }
   return t;
@@ -738,16 +808,31 @@ $("#items").addEventListener("input", e => {
   updateTotal();
 });
 $("#items").addEventListener("click", e => { const b = e.target.closest("[data-rm]"); if (!b) return; pending.items.splice(+b.dataset.rm, 1); renderItems(); });
-$("#cancelRes").addEventListener("click", () => { pending = null; $("#resultCard").classList.add("hidden"); });
+$("#cancelRes").addEventListener("click", () => {
+  if (editing) { endEdit(); resetAdd(); go("hoy"); return; }
+  pending = null; $("#resultCard").classList.add("hidden");
+});
 $("#saveRes").addEventListener("click", () => {
   if (!pending || !pending.items.length) return;
   const t = updateTotal();
-  const d = dayOf(today());
-  d.meals.push({ id: Math.random().toString(36).slice(2,10), ts: Date.now(), type: segGet("#mealType") || defaultMealType(), src: pending.src,
+  const d = dayOf(editing ? editing.day : today());
+  const items = pending.items.map(i => ({ nombre: i.nombre, gramos: Math.round(i.gramos), k100: i.k100 || 0, hidden: !!i.hidden,
+    base: { g: i.base.g, kcal: Math.round(i.base.kcal*10)/10, p: Math.round(i.base.p*10)/10, c: Math.round(i.base.c*10)/10, f: Math.round(i.base.f*10)/10 }, kcal: Math.round(i.kcal) }));
+  const meal = { type: segGet("#mealType") || defaultMealType(), src: pending.src, plato: pending.plato,
     name: pending.items.length === 1 ? pending.items[0].nombre : pending.plato,
     detail: pending.items.map(i => i.nombre + " (" + round(i.gramos) + " g)").join(", "),
     kcal: round(t.k), p: Math.round(t.p*10)/10, c: Math.round(t.c*10)/10, f: Math.round(t.f*10)/10,
-    thumb: pending.src === "foto" ? photoThumb : null });
+    items, ctx: lastReq ? lastReq.ctx : null };
+  if (editing) {
+    const i = d.meals.findIndex(m => m.id === editing.id);
+    if (i >= 0) d.meals[i] = Object.assign({}, d.meals[i], meal, { thumb: d.meals[i].thumb || null });
+    store.set("day-"+editing.day, d);
+    endEdit(); resetAdd(); renderToday(); go("hoy"); toast("Cambios guardados ✓");
+    return;
+  }
+  const id = Math.random().toString(36).slice(2,10);
+  d.meals.push(Object.assign({ id, ts: Date.now(), thumb: pending.src === "foto" ? photoThumb : null }, meal));
+  if (pending.src === "foto" && photoBlob) photoStore.put(id, photoBlob);
   store.set("day-"+today(), d);
   resetAdd(); renderToday(); go("hoy"); toast("Guardado ✓");
 });
